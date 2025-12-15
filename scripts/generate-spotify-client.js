@@ -27,22 +27,56 @@ function generateType(typeName, typeSchema) {
 }
 
 function getGeneratedCode(typeName, typeSchema) {
-  const generatedType = getGeneratedType(typeSchema);
+  var imports = [];
+  const generatedType = getGeneratedType(typeSchema, imports);
+  const imports_def = imports.length === 0 ? "" :
+    imports.map(key => `import { ${key} } from "./${key}";\n`).join("") + "\n";
+  const type_def = `export type ${typeName} = ${generatedType};`;
 
-  return `export type ${typeName} = ${generatedType};`;
+  return imports_def + type_def;
 }
 
-function getGeneratedType(typeSchema) {
-  const schemaType = typeSchema.type;
+function is_undefined(x) {
+  return typeof x === "undefined";
+}
 
-  // TO DO: Generate typescript code from schema
+function getGeneratedType(typeSchema, imports) {
+  if (!is_undefined(typeSchema.oneOf)) {
+    return "(" + typeSchema.oneOf.map(schema =>
+      getGeneratedType(schema, imports)).join(" | ") + ")";
+  }
+
+  if (!is_undefined(typeSchema.allOf)) {
+    return "(" + typeSchema.allOf.map(schema =>
+      getGeneratedType(schema, imports)).join(" & ") + ")";
+  }
+
+  if (!is_undefined(typeSchema["$ref"])) {
+    const imported_type = typeSchema["$ref"].replace("#/components/schemas/", "");
+    if (!imports.includes(imported_type)) {
+      imports.push(imported_type);
+    }
+    return imported_type;
+  }
+
+  const schemaType = typeSchema.type;
   switch (schemaType) {
     case "number":
     case "integer":
+      return "number";
     case "string":
+      if (!is_undefined(typeSchema.enum)) {
+        return typeSchema.enum.map(e => `"${e}"`).join(" | ");
+      }
     case "boolean":
+      return schemaType;
     case "array":
+      return getGeneratedType(typeSchema.items, imports) + "[]";
     case "object":
+      const required = !is_undefined(typeSchema.required) ? typeSchema.required : [];
+      return "{\n" + Object.entries(typeSchema.properties).map(([key, value]) =>
+        `  ${key}${required.includes(key) ? "" : "?"}: ${getGeneratedType(value, imports)};`
+      ).join("\n") + "\n}";
     default:
       return "";
   }
